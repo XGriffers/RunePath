@@ -10,6 +10,7 @@ import java.util.List;
 
 @Service
 public class QuestServiceImpl implements QuestService {
+    
 
     @Autowired
     private QuestRepository questRepository;
@@ -20,7 +21,23 @@ public class QuestServiceImpl implements QuestService {
     }
 
     @Override
+    public Quest getQuestById(Long id) {
+        return questRepository.findById(id).orElse(null);
+    }
+
+    @Override
+    public Quest updateQuest(Quest quest) {
+        return questRepository.save(quest);
+    }
+
+    @Override
+    public void deleteQuest(Long id) {
+        questRepository.deleteById(id);
+    }
+
+    @Override
     public Quest createQuest(Quest quest) {
+        
         return questRepository.save(quest);
     }
 }

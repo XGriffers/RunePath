@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class ProgressServiceImpl implements ProgressService {
@@ -15,13 +16,34 @@ public class ProgressServiceImpl implements ProgressService {
     private ProgressRepository progressRepository;
 
     @Override
-    public List<Progress> getProgressByUserId(Long userId) {
-        // Implement logic to retrieve progress by user ID if needed.
-        return null; // Placeholder for actual implementation.
+    public List<Progress> getProgressForUser(Long userId) {
+        return progressRepository.findByUserId(userId);
     }
 
     @Override
     public Progress createProgress(Progress progress) {
         return progressRepository.save(progress);
+    }
+
+    @Override
+    public Progress updateProgress(Long progressId, Progress progressDetails) {
+        Optional<Progress> progress = progressRepository.findById(progressId);
+        if (progress.isPresent()) {
+            Progress existingProgress = progress.get();
+            existingProgress.setCompleted(progressDetails.isCompleted());
+            existingProgress.setUpdatedProgress(progressDetails.getUpdatedProgress());
+            return progressRepository.save(existingProgress);
+        }
+        return null; // Or throw an exception if the progress doesn't exist
+    }
+
+    @Override
+    public void deleteProgress(Long progressId) {
+        progressRepository.deleteById(progressId);
+    }
+
+    @Override
+    public Progress getProgressById(Long progressId) {
+        return progressRepository.findById(progressId).orElse(null);
     }
 }

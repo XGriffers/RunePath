@@ -1,5 +1,7 @@
 package com.runepath.models;
 
+import java.sql.Timestamp;
+
 import jakarta.persistence.*;
 
 @Entity
@@ -21,12 +23,35 @@ public class Progress {
     @Column(nullable = false)
     private boolean completed;
 
+    @Column(nullable = false)
+    private Timestamp created_at;
+
+    @Column(nullable = true)
+    private Timestamp updatedProgress;
+
     public Progress() {}
 
-    public Progress(User user, Quest quest, boolean completed) {
+    public void updateProgress(User user, Quest quest, boolean completed, Timestamp updatedProgress) {
         this.user = user;
         this.quest = quest;
         this.completed = completed;
+        this.updatedProgress = updatedProgress;
+    }
+    
+
+    public Progress(Timestamp created_at, User user, Quest quest, boolean completed, Timestamp updatedProgress) {
+        this.user = user;
+        this.quest = quest;
+        this.completed = completed;
+        this.created_at = created_at;
+    }
+    
+    public Timestamp getUpdatedProgress() {
+        return updatedProgress;
+    }
+    
+    public void setUpdatedProgress(Timestamp updatedProgress) {
+        this.updatedProgress = updatedProgress;
     }
 
     // Getters and setters
@@ -60,5 +85,8 @@ public class Progress {
 
     public void setCompleted(boolean completed) {
         this.completed = completed;
+    }
+    public Timestamp getCreated_at() {
+        return created_at;
     }
 }
