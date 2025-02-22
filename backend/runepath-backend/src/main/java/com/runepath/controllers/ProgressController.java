@@ -14,9 +14,10 @@ public class ProgressController {
     private ProgressService progressService;
 
     @GetMapping("/{userId}")
-    public List<Progress> getProgressByUserId(@PathVariable Long userId) {
-        return progressService.getProgressByUserId(userId);
-    }
+public List<Progress> getProgressForUser(@PathVariable Long userId) {
+    return progressService.getProgressForUser(userId);
+}
+
 
     @PostMapping
     public Progress createProgress(@RequestBody Progress progress) {

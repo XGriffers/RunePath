@@ -26,6 +26,12 @@ public class UserController {
         return userService.getAllUsers();
     }
 
+    @PutMapping("/{username}")
+    public ResponseEntity<User> updateUser(@PathVariable Long id, @Valid @RequestBody User user) {
+        User updatedUser = userService.updateUser(user, id);
+        return new ResponseEntity<>(updatedUser, HttpStatus.OK);
+    }
+
     @PostMapping
     public ResponseEntity<User> createUser(@Valid @RequestBody User user) {
         User createdUser = userService.createUser(user);
