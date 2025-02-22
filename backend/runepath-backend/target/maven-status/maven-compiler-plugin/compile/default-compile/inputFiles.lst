@@ -12,5 +12,6 @@ E:\RunePath\backend\runepath-backend\src\main\java\com\runepath\repositories\Use
 E:\RunePath\backend\runepath-backend\src\main\java\com\runepath\repositories\QuestRepository.java
 E:\RunePath\backend\runepath-backend\src\main\java\com\runepath\controllers\QuestController.java
 E:\RunePath\backend\runepath-backend\src\main\java\com\runepath\repositories\ProgressRepository.java
+E:\RunePath\backend\runepath-backend\src\main\java\com\runepath\logging\DatabaseConnectionLogger.java
 E:\RunePath\backend\runepath-backend\src\main\java\com\runepath\models\Quest.java
 E:\RunePath\backend\runepath-backend\src\main\java\com\runepath\services\impl\ProgressServiceImpl.java
