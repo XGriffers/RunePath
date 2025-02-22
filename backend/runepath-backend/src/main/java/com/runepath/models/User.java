@@ -1,5 +1,8 @@
 package com.runepath.models;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Valid;
 import jakarta.persistence.*;
 
 @Entity
@@ -10,10 +13,13 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @NotBlank(message = "Username is required")
+
     @Column(unique = true, nullable = false)
     private String username;
 
     @Column(nullable = false)
+    @NotNull(message = "Member status is required")
     private boolean isMember;
 
     // Default constructor

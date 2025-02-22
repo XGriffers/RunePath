@@ -1,5 +1,7 @@
 package com.runepath.models;
 
+import java.sql.Timestamp;
+
 import jakarta.persistence.*;
 
 @Entity
@@ -21,12 +23,16 @@ public class Progress {
     @Column(nullable = false)
     private boolean completed;
 
+    @Column(nullable = false)
+    private Timestamp created_at;
+
     public Progress() {}
 
-    public Progress(User user, Quest quest, boolean completed) {
+    public Progress(Timestamp created_at, User user, Quest quest, boolean completed) {
         this.user = user;
         this.quest = quest;
         this.completed = completed;
+        this.created_at = created_at;
     }
 
     // Getters and setters

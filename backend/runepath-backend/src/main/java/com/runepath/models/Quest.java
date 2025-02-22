@@ -1,5 +1,7 @@
 package com.runepath.models;
 
+import java.sql.Timestamp;
+
 import jakarta.persistence.*;
 
 @Entity
@@ -23,14 +25,18 @@ public class Quest {
     @Column(nullable = false)
     private boolean isMembers;
 
+    @Column(nullable = false)
+    private Timestamp created_at;
+
     public Quest() {}
     
-    public Quest(String title, String requirements, String rewards, Integer difficulty, boolean isMembers) {
+    public Quest(Timestamp created_at, String title, String requirements, String rewards, Integer difficulty, boolean isMembers) {
         this.title = title;
         this.requirements = requirements;
         this.rewards = rewards;
         this.difficulty = difficulty;
         this.isMembers = isMembers;
+        this.created_at = created_at;
     }
 
     // Getters and setters
