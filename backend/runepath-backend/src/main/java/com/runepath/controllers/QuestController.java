@@ -23,3 +23,4 @@ public class QuestController {
         return questService.createQuest(quest);
     }
 }
+
