@@ -2,6 +2,7 @@ import logging
 import requests
 import numpy as np
 import json
+import math
 from tensorflow import keras
 
 Model = keras.models.Model
@@ -27,53 +28,128 @@ class RunePathAI:
         self.dda_agent = None
         
 
-
-    def load_quest_data(self, quest_data):
-        self.quest_graph = {quest['name']: quest for quest in quest_data}
-        logger.info(f"Loaded {len(quest_data)} quests into the graph")
-
     def fetch_player_data(self, username):
         profile_url = f"https://apps.runescape.com/runemetrics/profile/profile?user={username}"
         quests_url = f"https://apps.runescape.com/runemetrics/quests?user={username}"
+       
+
+
 
         profile_response = requests.get(profile_url)
         quests_response = requests.get(quests_url)
+       
 
         if profile_response.status_code != 200 or quests_response.status_code != 200:
-            raise Exception("Failed to fetch player data from RuneMetrics API")
+            if  profile_response != 200:
+                logger.error(f"Failed to fetch player data from RuneMetrics API: {profile_response.status_code}") 
+                raise Exception("Failed to fetch player data from RuneMetrics API")
+        
+        
 
         profile_data = profile_response.json()
         quests_data = quests_response.json()
-        
 
+        SKILL_NAMES = {
+            0: "Attack", 1: "Defence", 2: "Strength", 3: "Constitution", 4: "Ranged", 5: "Prayer",
+            6: "Magic", 7: "Cooking", 8: "Woodcutting", 9: "Fletching", 10: "Fishing", 11: "Firemaking",
+            12: "Crafting", 13: "Smithing", 14: "Mining", 15: "Herblore", 16: "Agility", 17: "Thieving",
+            18: "Slayer", 19: "Farming", 20: "Runecrafting", 21: "Hunter", 22: "Construction",
+            23: "Summoning", 24: "Dungeoneering", 25: "Divination", 26: "Invention", 27: "Archaeology",
+            28: "Necromancy"
+        }  
 
         player_data = {
         "is_member": any(skill["id"] > 20 for skill in profile_data.get("skillvalues", [])),
         "skills": {},
         "completed_quests": []
-    }
-
+            }
+        
         for skill in profile_data.get("skillvalues", []):
-            player_data["skills"][skill["id"]] = skill["level"]
-
+            skill_id = skill["id"]
+            skill_name = SKILL_NAMES.get(skill_id, f"Unknown Skill {skill_id}")
+            player_data["skills"][skill_name] = {
+                "id": skill_id,
+                "level": skill["level"],
+                "xp": skill["xp"],
+                "rank": skill["rank"],
+                "progress": self.calculate_progress_to_level(skill["xp"], skill["level"])
+            }
+        
         for quest in quests_data.get("quests", []):
             if quest["status"] == "COMPLETED":
                 player_data["completed_quests"].append(quest["title"])
-
+        
+        
         with open(f"{username}_player_data.json", "w") as f:
             json.dump(player_data, f, indent=4)
         logger.info(f"Saved player data to {username}_player_data.json")
 
         return player_data
     
+    def xp_for_level(self, level):
+        return sum(math.floor(l + 300 * 2 ** (l / 7)) for l in range(1, level))
+
+    def xp_to_level(self, xp):
+    # RuneScape's official XP table
+        xp_table = [0]
+        max = 120
+        for level in range(1, max):  # RuneScape max level is 120 (or 200M XP)
+            xp_table.append(xp_table[-1] + math.floor(level + 300 * 2 ** (level / 7)))
+
+        # Find the level corresponding to the given XP
+        for level, xp_threshold in enumerate(xp_table):
+            if xp < xp_threshold:
+                return level
+        return max  # Cap at max level
+
+    def calculate_progress_to_level(self, current_xp, current_level):
+        xp_for_current_level = self.xp_for_level(current_level)
+        xp_for_next_level = self.xp_for_level(current_level + 1)
+    
+        if current_xp < xp_for_current_level:
+            return 0  # Prevent negative progress
+    
+        xp_needed = xp_for_next_level - xp_for_current_level
+        xp_gained = current_xp - xp_for_current_level
+        progress = (xp_gained / xp_needed) * 100
+    
+        return round(progress, 2)  # Return progress as a percentage (0-100)
+
+
+
+    
+   
+    def calculate_combat_level(skills, player_data):
+        calculate_combat_level = 0
+        
+        attack = skills.get(0, 1)
+        defence = skills.get(1, 1)
+        strength = skills.get(2, 1)
+        hitpoints = skills.get(3, 10)
+        ranged = skills.get(4, 1)
+        prayer = skills.get(5, 1)
+        magic = skills.get(6, 1)
+    
+        base = 0.25 * (defence + hitpoints + math.floor(prayer/2))
+        melee = 0.325 * (attack + strength)
+        range_magic = 0.325 * (math.floor(3*ranged/2) + magic)
+        player_data["combat_level"] = calculate_combat_level(player_data["skills"])                                     
+    
+        return math.floor(base + max(melee, range_magic))
+
+    def load_quest_data(self, quest_data):
+        self.quest_graph = {quest['name']: quest for quest in quest_data}
+        logger.info(f"Loaded {len(quest_data)} quests into the graph")
 
     def fetch_quest_data(self, username):
         quests_url = f"https://apps.runescape.com/runemetrics/quests?user={username}"
         response = requests.get(quests_url)
         if response.status_code != 200:
             raise Exception("Failed to fetch quest data from RuneMetrics API")
+        
         quests_data = response.json()
         quest_graph = {}
+
         for quest in quests_data.get("quests", []):
             quest_title = quest["title"]
             quest_graph[quest_title] = {
@@ -105,6 +181,7 @@ class RunePathAI:
                     }
 
 
+        quest_graph[quest_title]["skill_requirements"] = quest.get("skillRequirements", {})
         self.quest_graph = quest_graph
         logger.info(f"Loaded {len(quest_graph)} quests from RuneMetrics API")
 
@@ -218,6 +295,8 @@ class HybridRecommender:
         quest_input = Input(shape=(1,))
         quest_difficulty = Input(shape=(1,))
         quest_rewards = Input(shape=(1,))
+        combat_level = Input(shape=(1,))
+        
 
         player_embedding = Embedding(num_players, 50)(player_input)
         quest_embedding = Embedding(num_quests, 50)(quest_input)
@@ -225,7 +304,7 @@ class HybridRecommender:
         player_flatten = Flatten()(player_embedding)
         quest_flatten = Flatten()(quest_embedding)
 
-        concat = Concatenate()([player_flatten, quest_flatten, quest_difficulty, quest_rewards])
+        concat = Concatenate()([player_flatten, quest_flatten, quest_difficulty, quest_rewards, combat_level])
         dense1 = Dense(100, activation='relu')(concat)
         dense2 = Dense(50, activation='relu')(dense1)
         output = Dense(1)(dense2)
@@ -234,22 +313,26 @@ class HybridRecommender:
         optimizer = Adam(learning_rate=0.001, clipnorm=1.0)
         self.model.compile(optimizer=optimizer, loss='mse')
 
-    def train(self, player_ids, quest_ids, difficulties, rewards, ratings, epochs, batch_size):
+    def train(self, player_ids, quest_ids, difficulties, rewards, combat_level, ratings, epochs = 100, batch_size = 1024):
             reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=0.00001)
             early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
-            history = self.model.fit(
-                [player_ids, quest_ids, difficulties, rewards],
+            if self.recommender:
+                # Calculate or retrieve combat levels for the players
+                combat_level = np.array([self.calculate_combat_level(self.player_data['skills']) for _ in player_ids])
+                history = self.model.fit(
+                [player_ids, quest_ids, difficulties, rewards, combat_level],
                 ratings,
                 epochs=epochs,
                 batch_size=batch_size,
                 callbacks=[reduce_lr, early_stopping],
                 validation_split=0.2
             )
+
             return history
 
 
-    def predict(self, player_ids, quest_ids, difficulties, rewards):
-            return self.model.predict([player_ids, quest_ids, difficulties, rewards])
+    def predict(self, player_ids, quest_ids, difficulties, rewards, combat_level):
+            return self.model.predict([player_ids, quest_ids, difficulties, rewards, combat_level])
 
 
 class DDAAgent:
