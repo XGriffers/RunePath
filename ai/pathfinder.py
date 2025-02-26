@@ -3,6 +3,7 @@ import requests
 import numpy as np
 import json
 import math
+import os
 from tensorflow import keras
 
 Model = keras.models.Model
@@ -26,6 +27,8 @@ class RunePathAI:
         self.player_data = {}
         self.recommender = None
         self.dda_agent = None
+        if not os.path.exists("rs_xp_table.json"):
+            self.save_xp_table_to_json()
         
 
     def fetch_player_data(self, username):
@@ -59,7 +62,7 @@ class RunePathAI:
         }  
 
         player_data = {
-        "is_member": any(skill["id"] > 20 for skill in profile_data.get("skillvalues", [])),
+        "is member": any(skill["id"] > 20 for skill in profile_data.get("skillvalues", [])),
         "skills": {},
         "completed_quests": []
             }
@@ -68,12 +71,14 @@ class RunePathAI:
             skill_id = skill["id"]
             skill_name = SKILL_NAMES.get(skill_id, f"Unknown Skill {skill_id}")
             player_data["skills"][skill_name] = {
-                "id": skill_id,
-                "level": skill["level"],
-                "xp": skill["xp"],
-                "rank": skill["rank"],
-                "progress": self.calculate_progress_to_level(skill["xp"], skill["level"])
+                "Id": skill_id,
+                "Level": skill["level"],
+                "Total xp": skill["xp"],
+                "Rank": skill["rank"],
+
+                "Progress": self.calculate_progress_to_level(skill["xp"], skill["level"])
             }
+            print(f"Skill: {skill_name}, Level: {skill['level']}, API XP: {skill['xp']}"),
         
         for quest in quests_data.get("quests", []):
             if quest["status"] == "COMPLETED":
@@ -85,39 +90,51 @@ class RunePathAI:
         logger.info(f"Saved player data to {username}_player_data.json")
 
         return player_data
+
+
+    def generate_xp_table(self):
+        xp_table = {}
+        for level in range(1, 121):  # Levels 1 to 120
+            if level == 1:
+                xp = 0
+            else:
+                xp = sum(math.floor(i + 300 * 2**(i/7)) for i in range(1, level))
+            xp_table[str(level)] = xp
+
+        # Add special case for max XP
+        xp_table["max"] = 200000000
+
+        return xp_table
+
+    def save_xp_table_to_json(self, filename="rs_xp_table.json"):
+        xp_table = self.generate_xp_table()
+        with open(filename, 'w') as f:
+            json.dump(xp_table, f, indent=4)
+        print(f"XP table saved to {filename}")
+
+
+    def calculate_progress_to_level(self, xp, level):
+        with open("rs_xp_table.json", "r") as f:
+            xp_table = json.load(f)
     
-    def xp_for_level(self, level):
-        return sum(math.floor(l + 300 * 2 ** (l / 7)) for l in range(1, level))
-
-    def xp_to_level(self, xp):
-    # RuneScape's official XP table
-        xp_table = [0]
-        max = 120
-        for level in range(1, max):  # RuneScape max level is 120 (or 200M XP)
-            xp_table.append(xp_table[-1] + math.floor(level + 300 * 2 ** (level / 7)))
-
-        # Find the level corresponding to the given XP
-        for level, xp_threshold in enumerate(xp_table):
-            if xp < xp_threshold:
-                return level
-        return max  # Cap at max level
-
-    def calculate_progress_to_level(self, current_xp, current_level):
-        xp_for_current_level = self.xp_for_level(current_level)
-        xp_for_next_level = self.xp_for_level(current_level + 1)
+        current_level_xp = xp_table[str(level)]
+        next_level_xp = xp_table[str(level + 1)] if level < 120 else xp_table["max"]
     
-        if current_xp < xp_for_current_level:
-            return 0  # Prevent negative progress
+        xp_for_this_level = next_level_xp - current_level_xp
+        xp_gained_in_level = xp - current_level_xp
     
-        xp_needed = xp_for_next_level - xp_for_current_level
-        xp_gained = current_xp - xp_for_current_level
-        progress = (xp_gained / xp_needed) * 100
+        if xp_gained_in_level < 0:
+            return 0.0
+        elif xp_gained_in_level >= xp_for_this_level:
+            return 99.99
     
-        return round(progress, 2)  # Return progress as a percentage (0-100)
+        progress = (xp_gained_in_level / xp_for_this_level) * 100
+        return round(min(progress, 99.99), 2)
 
 
 
-    
+
+            
    
     def calculate_combat_level(skills, player_data):
         calculate_combat_level = 0

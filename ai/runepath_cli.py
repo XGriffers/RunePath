@@ -75,6 +75,15 @@ class RunePathCLI(cmd.Cmd):
         for quest in suggested_quests:
             print(f"- {quest}")
 
+    def do_create_xp_table(self, arg):
+        """Create and save the RuneScape XP table to a JSON file"""
+        try:
+            self.ai.save_xp_table_to_json()
+            print("XP table created and saved successfully.")
+        except Exception as e:
+            print(f"Error creating XP table: {str(e)}")
+
+
     
     def do_quit(self, arg):
         """Exit the RunePath AI CLI"""
