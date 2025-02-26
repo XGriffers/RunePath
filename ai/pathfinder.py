@@ -24,30 +24,51 @@ logger = logging.getLogger(__name__)
 class RunePathAI:
     def __init__(self):
         self.quest_graph = {}
-        self.player_data = {}
+        self.player_data = {}  # Add this to store player data
         self.recommender = None
         self.dda_agent = None
-        if not os.path.exists("rs_xp_table.json"):
-            self.save_xp_table_to_json()
+
+    def exact_xp(self, level):
+        """Calculate exact XP required for a given RuneScape level"""
+        if level <= 1:
+            return 0
+        total = 0
+        for n in range(1, level):
+            total += math.floor((n + 300 * (2 ** (n / 7.0))) / 4)
+        return total
+
+    def progress_to_next_level(self, current_xp, current_level):
+        """Calculate percentage progress to next level using RuneScape XP"""
+        current_xp_scaled = current_xp / 10.0
+        current_level_xp = self.exact_xp(current_level)
+        next_level_xp = self.exact_xp(current_level + 1)
         
+        #print(f"Debug: {current_level} - Raw XP: {current_xp}, Scaled XP: {current_xp_scaled}, "
+              #f"Current Level XP: {current_level_xp}, Next Level XP: {next_level_xp}")
+        
+        if current_xp_scaled < current_level_xp:
+            return 0.0
+        if current_xp_scaled >= next_level_xp:
+            return 100.0
+        
+        xp_needed = next_level_xp - current_level_xp
+        xp_gained = current_xp_scaled - current_level_xp
+        percentage = (xp_gained / xp_needed) * 100
+        return round(percentage, 2)
 
     def fetch_player_data(self, username):
         profile_url = f"https://apps.runescape.com/runemetrics/profile/profile?user={username}"
         quests_url = f"https://apps.runescape.com/runemetrics/quests?user={username}"
-       
-
-
 
         profile_response = requests.get(profile_url)
         quests_response = requests.get(quests_url)
-       
 
         if profile_response.status_code != 200 or quests_response.status_code != 200:
-            if  profile_response != 200:
-                logger.error(f"Failed to fetch player data from RuneMetrics API: {profile_response.status_code}") 
-                raise Exception("Failed to fetch player data from RuneMetrics API")
-        
-        
+            if profile_response.status_code != 200:
+                logger.error(f"Failed to fetch player data: {profile_response.status_code}")
+            if quests_response.status_code != 200:
+                logger.error(f"Failed to fetch quest data: {quests_response.status_code}")
+            raise Exception("Failed to fetch player data from RuneMetrics API")
 
         profile_data = profile_response.json()
         quests_data = quests_response.json()
@@ -59,100 +80,61 @@ class RunePathAI:
             18: "Slayer", 19: "Farming", 20: "Runecrafting", 21: "Hunter", 22: "Construction",
             23: "Summoning", 24: "Dungeoneering", 25: "Divination", 26: "Invention", 27: "Archaeology",
             28: "Necromancy"
-        }  
+        }
 
         player_data = {
-        "is member": any(skill["id"] > 20 for skill in profile_data.get("skillvalues", [])),
-        "skills": {},
-        "completed_quests": []
-            }
+            "is_member": any(skill["id"] > 20 for skill in profile_data.get("skillvalues", [])),
+            "skills": {},
+            "completed_quests": [],
+            "combat_level": int(profile_data.get("combatlevel", "0"))
+        }
         
         for skill in profile_data.get("skillvalues", []):
             skill_id = skill["id"]
             skill_name = SKILL_NAMES.get(skill_id, f"Unknown Skill {skill_id}")
+            total_xp = skill["xp"]
+            level = skill["level"]
             player_data["skills"][skill_name] = {
                 "Id": skill_id,
-                "Level": skill["level"],
-                "Total xp": skill["xp"],
+                "Level": level,
+                "Total_xp": total_xp,
                 "Rank": skill["rank"],
-
-                "Progress": self.calculate_progress_to_level(skill["xp"], skill["level"])
+                "Progress": self.progress_to_next_level(total_xp, level)
             }
-            print(f"Skill: {skill_name}, Level: {skill['level']}, API XP: {skill['xp']}"),
         
         for quest in quests_data.get("quests", []):
             if quest["status"] == "COMPLETED":
                 player_data["completed_quests"].append(quest["title"])
         
+        self.player_data[username] = player_data  # Store in instance
+        
         
         with open(f"{username}_player_data.json", "w") as f:
             json.dump(player_data, f, indent=4)
-        logger.info(f"Saved player data to {username}_player_data.json")
-
+            logger.info(f"Saved player data to {username}_player_data.json")
+        
+        logger.info(f"Updated player data: {player_data}")
         return player_data
 
 
     def generate_xp_table(self):
-        xp_table = {}
-        for level in range(1, 121):  # Levels 1 to 120
-            if level == 1:
-                xp = 0
-            else:
-                xp = sum(math.floor(i + 300 * 2**(i/7)) for i in range(1, level))
-            xp_table[str(level)] = xp
-
-        # Add special case for max XP
-        xp_table["max"] = 200000000
-
-        return xp_table
-
-    def save_xp_table_to_json(self, filename="rs_xp_table.json"):
-        xp_table = self.generate_xp_table()
-        with open(filename, 'w') as f:
-            json.dump(xp_table, f, indent=4)
-        print(f"XP table saved to {filename}")
-
-
-    def calculate_progress_to_level(self, xp, level):
-        with open("rs_xp_table.json", "r") as f:
-            xp_table = json.load(f)
+        levels_data = {}
+        for level in range(1, 128):
+            exact = self.exact_xp(level)
+            approx = self.approx_xp(level)
+            xp_to_next = self.exact_xp(level + 1) - exact if level < 127 else 0
     
-        current_level_xp = xp_table[str(level)]
-        next_level_xp = xp_table[str(level + 1)] if level < 120 else xp_table["max"]
-    
-        xp_for_this_level = next_level_xp - current_level_xp
-        xp_gained_in_level = xp - current_level_xp
-    
-        if xp_gained_in_level < 0:
-            return 0.0
-        elif xp_gained_in_level >= xp_for_this_level:
-            return 99.99
-    
-        progress = (xp_gained_in_level / xp_for_this_level) * 100
-        return round(min(progress, 99.99), 2)
-
-
-
-
+            levels_data[str(level)] = {
+                "total_xp_exact": exact,
+                "total_xp_approx": approx,
+                "xp_to_next_level": xp_to_next,
+                "error": abs(exact - approx)
+            }
             
+            # Write to JSON file
+        with open('xp_levels.json', 'w') as f:
+            json.dump(levels_data, f, indent=4)
    
-    def calculate_combat_level(skills, player_data):
-        calculate_combat_level = 0
-        
-        attack = skills.get(0, 1)
-        defence = skills.get(1, 1)
-        strength = skills.get(2, 1)
-        hitpoints = skills.get(3, 10)
-        ranged = skills.get(4, 1)
-        prayer = skills.get(5, 1)
-        magic = skills.get(6, 1)
-    
-        base = 0.25 * (defence + hitpoints + math.floor(prayer/2))
-        melee = 0.325 * (attack + strength)
-        range_magic = 0.325 * (math.floor(3*ranged/2) + magic)
-        player_data["combat_level"] = calculate_combat_level(player_data["skills"])                                     
-    
-        return math.floor(base + max(melee, range_magic))
 
     def load_quest_data(self, quest_data):
         self.quest_graph = {quest['name']: quest for quest in quest_data}
@@ -204,8 +186,9 @@ class RunePathAI:
 
 
     def update_player_data(self, player_data):
-        self.player_data = player_data
-        logger.info(f"Updated player data: {player_data}")
+        """Update player data in the instance"""
+        username = player_data.get("name", "unknown")
+        self.player_data[username] = player_data
 
     def initialize_recommender(self, num_players, num_quests, num_features):
         self.recommender = HybridRecommender(num_players, num_quests, num_features)
@@ -215,11 +198,13 @@ class RunePathAI:
 
     def train_recommender(self, player_ids, quest_ids, difficulties, rewards, ratings, epochs=100, batch_size=256):
         if self.recommender:
-            history = self.recommender.train(player_ids, quest_ids, difficulties, rewards, ratings, epochs, batch_size)
+            # Use the current player's combat level; assumes player data is loaded
+            combat_level = np.array([self.player_data.get(list(self.player_data.keys())[0], {}).get("combat_level", 0)] * len(player_ids))
+            history = self.recommender.train(player_ids, quest_ids, difficulties, rewards, combat_level, ratings, epochs, batch_size)
             return history
         else:
             logger.error("Recommender not initialized")
-
+            return None
 
     def update_membership(self, is_member):
         self.player_data['is_member'] = is_member
@@ -242,17 +227,47 @@ class RunePathAI:
                 if prereq not in self.player_data['completed_quests']:
                     return True  # Can do the quest if any subquest is incomplete
             return False  # All subquests are completed
-    
         return True
 
 
-    def suggest_quests(self, player_id, num_recommendations=5):
+    def suggest_quests(self, player_id, num_recommendations=5, username=None, progress_threshold=90.0):
         if self.recommender:
-            eligible_quests = [quest for quest, data in self.quest_graph.items()
-                            if data['user_eligible'] and not data['completed'] and data['status'] == 'STARTED' or data['status'] == 'NOT_STARTED']
-            if not eligible_quests:
+            # Get the player's skills (use username or first loaded player)
+            player_key = username if username else list(self.player_data.keys())[0]
+            skills = self.player_data.get(player_key, {}).get("skills", {})
+
+         # Check for skills close to leveling
+            near_level_skills = [
+                (skill, data["Progress"])
+                for skill, data in skills.items()
+                if data["Progress"] >= progress_threshold and data["Level"] < 126  # Cap at max level
+            ]
+        
+            if near_level_skills:
+                # Sort by progress (highest first) and take top recommendations
+                near_level_skills.sort(key=lambda x: x[1], reverse=True)
+                skill_recommendations = [
+                    f"Train {skill} to level {skills[skill]['Level'] + 1} ({progress:.2f}%)"
+                    for skill, progress in near_level_skills[:num_recommendations]
+                ]
+                # Pad with quests if fewer than num_recommendations
+                remaining_slots = num_recommendations - len(skill_recommendations)
+                if remaining_slots <= 0:
+                    return skill_recommendations
+
+            else:
+                skill_recommendations = []
+                remaining_slots = num_recommendations
+
+            # Proceed to quest recommendations if needed
+            eligible_quests = [
+                quest for quest, data in self.quest_graph.items()
+                if data['user_eligible'] and not data['completed'] and (data['status'] == 'STARTED' or data['status'] == 'NOT_STARTED')
+            ]
+            if not eligible_quests and not skill_recommendations:
                 skill_gaps = self.calculate_skill_gaps()
-                return [f"Train {skill} to level {self.player_data['skills'].get(skill, 0) + gap}" for skill, gap in skill_gaps.items()][:num_recommendations]
+                return [f"Train {skill} to level {skills.get(skill, {}).get('Level', 0) + gap}"
+                        for skill, gap in skill_gaps.items()][:num_recommendations]
 
             quest_ids = [list(self.quest_graph.keys()).index(quest) for quest in eligible_quests]
             difficulties = [self.quest_graph[quest]['difficulty'] for quest in eligible_quests]
@@ -262,31 +277,32 @@ class RunePathAI:
             quest_ids = np.array(quest_ids)
             difficulties = np.array(difficulties)
             rewards = np.array(rewards)
+            combat_level = np.array([self.player_data.get(player_key, {}).get("combat_level", 0)] * len(eligible_quests))
 
-            predictions = self.recommender.predict(player_ids, quest_ids, difficulties, rewards)
+            predictions = self.recommender.predict(player_ids, quest_ids, difficulties, rewards, combat_level)
             top_quests = sorted(zip(eligible_quests, predictions.flatten()), 
-                    key=lambda x: (self.quest_graph[x[0]]['status'] == 'STARTED', x[1]),
-                    reverse=True)
+                                key=lambda x: (self.quest_graph[x[0]]['status'] == 'STARTED', x[1]), 
+                                reverse=True)
 
-            suggested = []
-            for quest, _ in top_quests:
+            suggested = skill_recommendations[:]
+            for quest, _ in top_quests[:remaining_slots]:
                 if self.quest_graph[quest].get('subquests'):
                     for subquest in self.quest_graph[quest]['subquests']:
                         full_subquest_name = f"{quest}: {subquest}"
-                        if full_subquest_name not in self.player_data['completed_quests']:
+                        if full_subquest_name not in self.player_data.get(player_key, {}).get('completed_quests', []):
                             suggested.append(full_subquest_name)
                             break
-                    else:  # If all subquests are completed
+                    else:
                         suggested.append(quest)
                 else:
                     suggested.append(quest)
                 if len(suggested) == num_recommendations:
                     break
+        
             return suggested
         else:
             logger.error("Recommender not initialized")
             return []
-
 
         
     def calculate_skill_gaps(self):
@@ -308,12 +324,10 @@ class HybridRecommender:
         self.num_features = num_features
 
         player_input = Input(shape=(1,))
-
         quest_input = Input(shape=(1,))
         quest_difficulty = Input(shape=(1,))
         quest_rewards = Input(shape=(1,))
-        combat_level = Input(shape=(1,))
-        
+        combat_level_input = Input(shape=(1,))
 
         player_embedding = Embedding(num_players, 50)(player_input)
         quest_embedding = Embedding(num_quests, 50)(quest_input)
@@ -321,35 +335,30 @@ class HybridRecommender:
         player_flatten = Flatten()(player_embedding)
         quest_flatten = Flatten()(quest_embedding)
 
-        concat = Concatenate()([player_flatten, quest_flatten, quest_difficulty, quest_rewards, combat_level])
+        concat = Concatenate()([player_flatten, quest_flatten, quest_difficulty, quest_rewards, combat_level_input])
         dense1 = Dense(100, activation='relu')(concat)
         dense2 = Dense(50, activation='relu')(dense1)
         output = Dense(1)(dense2)
 
-        self.model = Model(inputs=[player_input, quest_input, quest_difficulty, quest_rewards], outputs=output)
+        self.model = Model(inputs=[player_input, quest_input, quest_difficulty, quest_rewards, combat_level_input], outputs=output)
         optimizer = Adam(learning_rate=0.001, clipnorm=1.0)
         self.model.compile(optimizer=optimizer, loss='mse')
 
-    def train(self, player_ids, quest_ids, difficulties, rewards, combat_level, ratings, epochs = 100, batch_size = 1024):
-            reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=0.00001)
-            early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
-            if self.recommender:
-                # Calculate or retrieve combat levels for the players
-                combat_level = np.array([self.calculate_combat_level(self.player_data['skills']) for _ in player_ids])
-                history = self.model.fit(
-                [player_ids, quest_ids, difficulties, rewards, combat_level],
-                ratings,
-                epochs=epochs,
-                batch_size=batch_size,
-                callbacks=[reduce_lr, early_stopping],
-                validation_split=0.2
-            )
-
-            return history
-
+    def train(self, player_ids, quest_ids, difficulties, rewards, combat_level, ratings, epochs=100, batch_size=1024):
+        reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=0.00001)
+        early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
+        history = self.model.fit(
+            [player_ids, quest_ids, difficulties, rewards, combat_level],
+            ratings,
+            epochs=epochs,
+            batch_size=batch_size,
+            callbacks=[reduce_lr, early_stopping],
+            validation_split=0.2
+        )
+        return history
 
     def predict(self, player_ids, quest_ids, difficulties, rewards, combat_level):
-            return self.model.predict([player_ids, quest_ids, difficulties, rewards, combat_level])
+        return self.model.predict([player_ids, quest_ids, difficulties, rewards, combat_level])
 
 
 class DDAAgent:

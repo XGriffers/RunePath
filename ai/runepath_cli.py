@@ -13,6 +13,7 @@ class RunePathCLI(cmd.Cmd):
     def __init__(self):
         super().__init__()
         self.ai = RunePathAI()
+        self.current_player = None
 
     def do_load_quests(self, arg):
         """Load quest data from RuneMetrics API: load_quests <username>"""
@@ -28,6 +29,7 @@ class RunePathCLI(cmd.Cmd):
         try:
             player_data = self.ai.fetch_player_data(arg)
             self.ai.update_player_data(player_data)
+            self.current_player = arg  # Set the current player
             print("Player data loaded successfully.")
             logger.info(f"Loaded player data for: {arg}")
         except Exception as e:
@@ -54,6 +56,10 @@ class RunePathCLI(cmd.Cmd):
 
     def do_train_recommender(self, arg):
         """Train the recommender system: train_recommender <epochs> <batch_size>"""
+        if not self.current_player:
+            print("Error: No player data loaded. Use 'load_player <username>' first.")
+            return
+        
         args = arg.split()
         epochs = int(args[0]) if len(args) > 0 else 100
         batch_size = int(args[1]) if len(args) > 1 else 1024
@@ -63,9 +69,10 @@ class RunePathCLI(cmd.Cmd):
         difficulties = np.random.randint(1, 10, 10000)
         rewards = np.random.randint(100, 10000, 10000)
         ratings = np.random.rand(10000)
+        combat_level = np.array([self.ai.player_data.get(self.current_player, {}).get("combat_level", 0)] * 10000)
+        
         self.ai.train_recommender(player_ids, quest_ids, difficulties, rewards, ratings, epochs, batch_size)
         print(f"Recommender system trained with {epochs} epochs and batch size {batch_size}")
-
 
     def do_suggest_quests(self, arg):
         """Suggest quests using the AI recommender"""
