@@ -4,19 +4,8 @@ import numpy as np
 import json
 import math
 import os
-from tensorflow import keras
-
-Model = keras.models.Model
-Sequential = keras.models.Sequential
-Input = keras.layers.Input
-Embedding = keras.layers.Embedding
-Flatten = keras.layers.Flatten
-Dense = keras.layers.Dense
-Concatenate = keras.layers.Concatenate
-Adam = keras.optimizers.Adam
-EarlyStopping = keras.callbacks.EarlyStopping
-ReduceLROnPlateau = keras.callbacks.ReduceLROnPlateau
-
+from runePathHybridRecomend import HybridRecommender
+from runePathDDAAgent import DDAAgent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -316,77 +305,5 @@ class RunePathAI:
         return skill_gaps
 
 
-
-class HybridRecommender:
-    def __init__(self, num_players, num_quests, num_features):
-        self.num_players = num_players
-        self.num_quests = num_quests
-        self.num_features = num_features
-
-        player_input = Input(shape=(1,))
-        quest_input = Input(shape=(1,))
-        quest_difficulty = Input(shape=(1,))
-        quest_rewards = Input(shape=(1,))
-        combat_level_input = Input(shape=(1,))
-
-        player_embedding = Embedding(num_players, 50)(player_input)
-        quest_embedding = Embedding(num_quests, 50)(quest_input)
-
-        player_flatten = Flatten()(player_embedding)
-        quest_flatten = Flatten()(quest_embedding)
-
-        concat = Concatenate()([player_flatten, quest_flatten, quest_difficulty, quest_rewards, combat_level_input])
-        dense1 = Dense(100, activation='relu')(concat)
-        dense2 = Dense(50, activation='relu')(dense1)
-        output = Dense(1)(dense2)
-
-        self.model = Model(inputs=[player_input, quest_input, quest_difficulty, quest_rewards, combat_level_input], outputs=output)
-        optimizer = Adam(learning_rate=0.001, clipnorm=1.0)
-        self.model.compile(optimizer=optimizer, loss='mse')
-
-    def train(self, player_ids, quest_ids, difficulties, rewards, combat_level, ratings, epochs=100, batch_size=1024):
-        reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=0.00001)
-        early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
-        history = self.model.fit(
-            [player_ids, quest_ids, difficulties, rewards, combat_level],
-            ratings,
-            epochs=epochs,
-            batch_size=batch_size,
-            callbacks=[reduce_lr, early_stopping],
-            validation_split=0.2
-        )
-        return history
-
-    def predict(self, player_ids, quest_ids, difficulties, rewards, combat_level):
-        return self.model.predict([player_ids, quest_ids, difficulties, rewards, combat_level])
-
-
-class DDAAgent:
-    def __init__(self, state_size, action_size):
-        self.state_size = state_size
-        self.action_size = action_size
-        self.model = self._build_model()
-    
-    def _build_model(self):
-        model = Sequential([
-            Dense(64, input_dim=self.state_size, activation='relu'),
-            Dense(64, activation='relu'),
-            Dense(64, activation='relu'),
-            Dense(self.action_size, activation='linear')
-        ])
-        model.compile(loss='mse', optimizer=Adam(learning_rate=0.0001))
-        return model
-    
-    def train(self, state, action, reward, next_state, done):
-        target = reward
-        if not done:
-            target = reward + 0.99 * np.amax(self.model.predict(next_state))
-        target_f = self.model.predict(state)
-        target_f[0][action] = target
-        self.model.fit(state, target_f, epochs=1, verbose=0)
-
-    def act(self, state):
-        act_values = self.model.predict(state)
-        return np.argmax(act_values)
 
 
