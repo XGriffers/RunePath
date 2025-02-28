@@ -5,7 +5,6 @@ import numpy as np
 import json
 import math
 import os
-from bs4 import BeautifulSoup
 from hybridrecommender import HybridRecommender
 from DDAAgent import DDAAgent
 
@@ -28,28 +27,10 @@ class RunePathAI:
         self.player_data = {}
         self.recommender = None
         self.dda_agent = None
-        self.training_methods = self.load_training_methods()  # Load cached data
         self.num_players = 1000
         self.num_features = 50
         
-
-    
-    def load_training_methods(self):
-        if os.path.exists("training_methods.json"):
-            with open("training_methods.json", "r") as f:
-                return json.load(f)
-        else:
-            logger.warning("No cached training methods found; run scrape_and_save_training_methods first")
-            return {}
         
-    def scrape_and_save_training_methods(self):
-        """Scrape training methods from Wiki and save to JSON"""
-        training_methods = self.scrape_wiki_training_data()
-        with open("training_methods.json", "w") as f:
-            json.dump(training_methods, f, indent=4)
-        self.training_methods = training_methods  # Update instance variable
-        logger.info("Scraped and saved training methods to training_methods.json")
-        return training_methods
     
     def generate_xp_table(self):
         levels_data = {}
@@ -90,65 +71,89 @@ class RunePathAI:
         return round(percentage, 2)
 
     def fetch_player_data(self, username):
+        """Fetch player data and quests from RuneMetrics API."""
         profile_url = f"https://apps.runescape.com/runemetrics/profile/profile?user={username}"
         quests_url = f"https://apps.runescape.com/runemetrics/quests?user={username}"
-
-        profile_response = requests.get(profile_url)
-        quests_response = requests.get(quests_url)
-
-        if profile_response.status_code != 200 or quests_response.status_code != 200:
-            if profile_response.status_code != 200:
-                logger.error(f"Failed to fetch player data: {profile_response.status_code}")
-            if quests_response.status_code != 200:
-                logger.error(f"Failed to fetch quest data: {quests_response.status_code}")
-            raise Exception("Failed to fetch player data from RuneMetrics API")
-
-        profile_data = profile_response.json()
-        quests_data = quests_response.json()
-
-
-        # Better F2P vs. Members check
-        members_skills_xp = sum(skill["xp"] for skill in profile_data.get("skillvalues", []) if skill["id"] > 20 and skill["xp"] > 1000)
-        members_quests = sum(1 for q in quests_data.get("quests", []) if q["status"] == "COMPLETED" and q["members"])
-        is_member = members_skills_xp > 10000 or members_quests > 5  # Thresholds adjustable
-
-        player_data = {
-        "is_member": is_member,
-        "skills": {},
-        "completed_quests": [q["title"] for q in quests_data.get("quests", []) if q["status"] == "COMPLETED"],
-        "combat_level": int(profile_data.get("combatlevel", "0"))
-        }
         
-        for skill in profile_data.get("skillvalues", []):
-            skill_id = skill["id"]
-            skill_name = self.SKILL_NAMES.get(skill_id, f"Unknown Skill {skill_id}")
-            total_xp = skill["xp"]
-            level = skill["level"]
-            player_data["skills"][skill_name] = {
-                "Id": skill_id,
-                "Level": level,
-                "Total_xp": total_xp,
-                "Rank": skill["rank"],
-                "Progress": self.progress_to_next_level(total_xp, level)
+        try:
+            profile_response = requests.get(profile_url)
+            quests_response = requests.get(quests_url)
+
+            if profile_response.status_code != 200 or quests_response.status_code != 200:
+                if profile_response.status_code != 200:
+                    logger.error(f"Failed to fetch player profile: {profile_response.status_code}")
+                if quests_response.status_code != 200:
+                    logger.error(f"Failed to fetch quest data: {quests_response.status_code}")
+                raise Exception("Failed to fetch player data from RuneMetrics API")
+
+            profile_data = profile_response.json()
+            quests_data = quests_response.json()
+
+            # Check for incomplete profile (OSRS or untracked)
+            if 'error' in profile_data or 'rank' not in profile_data.get('skillvalues', [{}])[0]:
+                logger.warning(f"Player {username} not found or profile incomplete in RuneMetrics. Using default profile.")
+                player_data = {
+                    "name": username,
+                    "combat_level": 3,
+                    "is_member": False,
+                    "skills": {s: {"Id": self.SKILL_NAMES.get(s, -1), "Level": 1, "Total_xp": 0, "Rank": -1, "Progress": 0.0} for s in self.SKILL_NAMES.values()},
+                    "completed_quests": []
+                }
+            else:
+                # Better F2P vs. Members check
+                members_skills_xp = sum(skill["xp"] / 10 for skill in profile_data.get("skillvalues", []) if skill["id"] > 20 and skill["xp"] > 1000)  # API XP is *10
+                members_quests = sum(1 for q in quests_data.get("quests", []) if q["status"] == "COMPLETED" and q.get("members", False))
+                is_member = members_skills_xp > 10000 or members_quests > 5  # Adjustable thresholds
+
+                # Build player data
+                player_data = {
+                    "name": profile_data.get("name", username),
+                    "combat_level": int(profile_data.get("combatlevel", 0)),
+                    "is_member": is_member,
+                    "skills": {},
+                    "completed_quests": [q["title"] for q in quests_data.get("quests", []) if q["status"] == "COMPLETED"]
+                }
+
+                # Process skills
+                for skill in profile_data.get("skillvalues", []):
+                    skill_id = skill["id"]
+                    skill_name = self.SKILL_NAMES.get(skill_id, f"Unknown Skill {skill_id}")
+                    total_xp = float(skill["xp"]) / 10  # Convert API XP to real XP
+                    level = skill["level"]
+                    rank = int(skill["rank"].replace(",", "")) if skill["rank"] != "-1" else -1
+                    progress = self.progress_to_next_level(total_xp, level)
+                    player_data["skills"][skill_name] = {
+                        "Id": skill_id,
+                        "Level": level,
+                        "Total_xp": total_xp,
+                        "Rank": rank,
+                        "Progress": progress
+                    }
+
+            # Store and save
+            self.player_data[username] = player_data
+            with open(f"{username}_player_data.json", "w") as f:
+                json.dump(player_data, f, indent=4)
+                logger.info(f"Saved player data to {username}_player_data.json")
+            
+            return player_data
+
+        except requests.RequestException as e:
+            logger.error(f"Failed to fetch player data for {username}: {e}")
+            # Fallback to default profile on error
+            default_data = {
+                "name": username,
+                "combat_level": 3,
+                "is_member": False,
+                "skills": {s: {"Id": self.SKILL_NAMES.get(s, -1), "Level": 1, "Total_xp": 0, "Rank": -1, "Progress": 0.0} for s in self.SKILL_NAMES.values()},
+                "completed_quests": []
             }
-        
-        for quest in quests_data.get("quests", []):
-            if quest["status"] == "COMPLETED":
-                player_data["completed_quests"].append(quest["title"])
-        
-        self.player_data[username] = player_data  # Store in instance
-        
-        
-        with open(f"{username}_player_data.json", "w") as f:
-            json.dump(player_data, f, indent=4)
-            logger.info(f"Saved player data to {username}_player_data.json")
-        
-        #logger.info(f"Updated player data: {player_data}")
-        return player_data
+            self.player_data[username] = default_data
+            with open(f"{username}_player_data.json", "w") as f:
+                json.dump(default_data, f, indent=4)
+                logger.info(f"Saved default player data to {username}_player_data.json")
+            return default_data
 
-
-    
-   
 
     def load_quest_data(self, quest_data):
         self.quest_graph = {quest['name']: quest for quest in quest_data}
@@ -203,112 +208,6 @@ class RunePathAI:
         """Update player data in the instance"""
         username = player_data.get("name", "unknown")
         self.player_data[username] = player_data
-
-    def scrape_wiki_training_data(self):
-        members_base_url = "https://runescape.wiki/w/{}_training"
-        f2p_base_url = "https://runescape.wiki/w/Free-to-play_{}_training"
-    
-        # Categorize skills
-        members_only_skills = {"Herblore", "Agility", "Thieving", "Slayer", "Farming", "Runecrafting", 
-                           "Hunter", "Construction", "Summoning", "Dungeoneering", "Divination", 
-                           "Invention", "Archaeology", "Necromancy"}
-        shared_skills = {skill for skill in self.SKILL_NAMES.values() if skill not in members_only_skills}
-        #wiki_skill_names = {k: v if v != "Constitution" else "Hitpoints" for k, v in self.SKILL_NAMES.items()}
-
-        training_methods = {}
-
-        # Scrape members-only skills
-        for skill_name in members_only_skills:
-            url = members_base_url.format(skill_name)
-            try:
-                response = requests.get(url)
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, 'html.parser')
-                tables = soup.find_all("table", class_="wikitable")
-                if not tables:
-                    logger.warning(f"No training table found for {skill_name} (members)")
-                    continue
-            
-                for table in tables:
-                    rows = table.find_all("tr")[1:]
-                    for row in rows:
-                        cols = row.find_all("td")
-                        if len(cols) >= 3:
-                            try:
-                                level = int(cols[0].text.strip().split("–")[0] or 0)
-                                method = cols[1].text.strip()
-                                xp_hour = float(cols[2].text.strip().replace(",", "").split()[0] or 0.0)
-                                training_methods.setdefault(skill_name, {}).update({
-                                    level: {"method": method, "xp_hour": xp_hour, "members": True}
-                                })
-                            except (ValueError, IndexError) as e:
-                                logger.debug(f"Skipping row in {skill_name}: {e}")
-            except requests.RequestException as e:
-                logger.error(f"Failed to scrape {skill_name} (members): {e}")
-
-        # Scrape shared skills (F2P and members)
-        for skill_name in shared_skills:
-            # F2P URL
-            f2p_url = f2p_base_url.format(skill_name)
-            try:
-                response = requests.get(f2p_url)
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, 'html.parser')
-                tables = soup.find_all("table", class_="wikitable")
-                if not tables:
-                    logger.warning(f"No F2P training table found for {skill_name}")
-                else:
-                    for table in tables:
-                        rows = table.find_all("tr")[1:]
-                        for row in rows:
-                            cols = row.find_all("td")
-                            if len(cols) >= 3:
-                                try:
-                                    level = int(cols[0].text.strip().split("–")[0] or 0)
-                                    method = cols[1].text.strip()
-                                    xp_hour = float(cols[2].text.strip().replace(",", "").split()[0] or 0.0)
-                                    training_methods.setdefault(skill_name, {}).update({
-                                        level: {"method": method, "xp_hour": xp_hour, "members": False}
-                                    })
-                                except (ValueError, IndexError) as e:
-                                    logger.debug(f"Skipping F2P row in {skill_name}: {e}")
-            except requests.RequestException as e:
-                logger.error(f"Failed to scrape F2P {skill_name}: {e}")
-
-            # Members URL
-            members_url = members_base_url.format(skill_name)
-            try:
-                response = requests.get(members_url)
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, 'html.parser')
-                tables = soup.find_all("table", class_="wikitable")
-                if not tables:
-                    logger.warning(f"No members training table found for {skill_name}")
-                else:
-                    for table in tables:
-                        rows = table.find_all("tr")[1:]
-                        for row in rows:
-                            cols = row.find_all("td")
-                            if len(cols) >= 3:
-                                try:
-                                    level = int(cols[0].text.strip().split("–")[0] or 0)
-                                    method = cols[1].text.strip()
-                                    xp_hour = float(cols[2].text.strip().replace(",", "").split()[0] or 0.0)
-                                    # Only add if not already in F2P or if clearly members-only (e.g., high level or members keyword)
-                                    if level > 70 or "Members" in method or method not in [m["method"] for m in training_methods.get(skill_name, {}).values()]:
-                                        training_methods.setdefault(skill_name, {}).update({
-                                            level: {"method": method, "xp_hour": xp_hour, "members": True}
-                                        })
-                                except (ValueError, IndexError) as e:
-                                    logger.debug(f"Skipping members row in {skill_name}: {e}")
-            except requests.RequestException as e:
-                logger.error(f"Failed to scrape members {skill_name}: {e}")
-
-        self.training_methods = training_methods
-        logger.info(f"Scraped training methods for {len(training_methods)} skills")
-        return training_methods
-    
-
 
     def initialize_recommender(self, num_players, num_quests, num_features):
         model_path = "pretrained_recommender_model.h5"
@@ -437,33 +336,49 @@ class RunePathAI:
         return True
 
 
-    def suggest_quests(self, player_id, num_recommendations=5, username=None, progress_threshold=90.0):
+    def suggest_quests(self, player_id, player_data, num_recommendations=5, username=None, progress_threshold=90.0):
         if not self.recommender:
             logger.error("Recommender not initialized")
             return []
-    
+        
         player_key = username if username else list(self.player_data.keys())[0]
         skills = self.player_data.get(player_key, {}).get("skills", {})
         combat_level = self.player_data.get(player_key, {}).get("combat_level", 0)
+        is_member = player_data.get("is_member", False)
+        base_url = "https://runescape.wiki/w/{}_training"
 
         # Prioritize near-level skills
-        near_level_skills = [(skill, data["Progress"]) for skill, data in skills.items() if data["Progress"] >= progress_threshold and data["Level"] < 126]
+        near_level_skills = [
+            (skill, data["Progress"], data["Level"])
+            for skill, data in skills.items()
+            if data["Progress"] >= progress_threshold and data["Level"] < (120 if skill in ["Dungeoneering", "Invention", "Archaeology", "Necromancy"] else 99)
+        ]
         SKILL_IDS = {name: idx for idx, name in enumerate(skills.keys())}
-    
+        
         if near_level_skills:
             near_level_skills.sort(key=lambda x: x[1], reverse=True)
+
             skill_recommendations = []
-            for skill, progress in near_level_skills:
+            
+            for skill, progress, level in near_level_skills:
+                wiki_skill = skill if skill != "Constitution" else "Hitpoints"  # Wiki uses "Hitpoints"
+                url = base_url.format(wiki_skill)
+                try:
+                    response = requests.head(url, timeout=5)
+                    link = url if response.status_code == 200 else "https://runescape.wiki/w/Skills"
+                except requests.RequestException:
+                    link = "https://runescape.wiki/w/Skills"  # Fallback on error
+                
                 player_ids = np.array([player_id]).reshape(1, 1)  # Shape: (1, 1)
                 quest_ids = np.array([0]).reshape(1, 1)           # Shape: (1, 1)
                 skill_ids = np.array([SKILL_IDS.get(skill, 0)]).reshape(1, 1)  # Shape: (1, 1)
                 difficulties = np.array([1]).reshape(1, 1)        # Shape: (1, 1)
-                rewards = np.array([self.training_methods.get(skill, {}).get(skills[skill]["Level"], {}).get("xp_hour", 1000) / 1000]).reshape(1, 1)  # Shape: (1, 1)
+                rewards = np.array([1.0]).reshape(1, 1)           # Dummy reward, since we’re not using XP/hour
                 combat_level_array = np.array([combat_level]).reshape(1, 1)  # Shape: (1, 1)
                 pred = self.recommender.predict(player_ids, quest_ids, skill_ids, difficulties, rewards, combat_level_array)
-                method = self.training_methods.get(skill, {}).get(skills[skill]["Level"], {}).get("method", "General Training")
-                skill_recommendations.append((f"Train {skill} to level {skills[skill]['Level'] + 1} ({progress:.2f}%) - {method}", pred[0][0]))
-        
+                method = f"Visit {link} for {skill} training details"
+                skill_recommendations.append((f"Train {skill} to level {level + 1} ({progress:.2f}%) - {method}", pred[0][0]))
+            
             skill_recommendations.sort(key=lambda x: x[1], reverse=True)
             suggested = [rec[0] for rec in skill_recommendations[:num_recommendations]]
             remaining_slots = num_recommendations - len(suggested)
@@ -493,8 +408,27 @@ class RunePathAI:
             suggested.append(quest)
             if len(suggested) == num_recommendations:
                 break
-    
-        return suggested
+        
+        # Merge Melee skills if present
+        melee_skills = {"Attack", "Strength", "Defence"}
+        melee_recs = [r for r in suggested if any(ms in r for ms in melee_skills)]
+        other_recs = [r for r in suggested if not any(ms in r for ms in melee_skills)]
+        if melee_recs:
+            highest_melee = max(melee_recs, key=lambda x: float(x.split("(")[1].split("%")[0]))
+            melee_skill = next(ms for ms in melee_skills if ms in highest_melee)
+            wiki_skill = melee_skill if melee_skill != "Constitution" else "Hitpoints"
+            url = base_url.format(wiki_skill)
+            try:
+                response = requests.head(url, timeout=5)
+                link = url if response.status_code == 200 else "https://runescape.wiki/w/Skills"
+            except requests.RequestException:
+                link = "https://runescape.wiki/w/Skills"
+            melee_rec = highest_melee.replace(melee_skill, "Melee").replace(f"for {melee_skill}", f"for Melee").replace(url, link)
+            suggested = other_recs + [melee_rec]
+        else:
+            suggested = other_recs
+
+        return suggested[:num_recommendations]
 
         
     def calculate_skill_gaps(self):

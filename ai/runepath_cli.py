@@ -5,7 +5,7 @@ from pathfinder import RunePathAI
 import numpy as np
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -18,11 +18,6 @@ class RunePathCLI(cmd.Cmd):
         super().__init__()
         self.ai = RunePathAI()
         self.current_player = None
-
-    def do_scrape_training_methods(self, arg):
-        """Scrape and save training methods from Wiki: scrape_training_methods"""
-        self.ai.scrape_and_save_training_methods()
-        print("Training methods scraped and saved to training_methods.json")
 
 
     def do_load_quests(self, arg):
@@ -86,12 +81,19 @@ class RunePathCLI(cmd.Cmd):
         print(f"Recommender system trained with {epochs} epochs and batch size {batch_size}")
 
     def do_suggest_quests(self, arg):
-        """Suggest quests using the AI recommender"""
-        player_id = 0  # Assuming a single player for simplicity
-        suggested_quests = self.ai.suggest_quests(player_id)
-        print("Suggested quests:")
-        for quest in suggested_quests:
-            print(f"- {quest}")
+        """Suggest quests and training methods for the loaded player."""
+        if not self.ai or not self.ai.recommender:
+            print("AI not initialized. Run 'initialize_ai' first.")
+            return
+        player_id = 0  # Assuming single player for simplicity
+        try:
+            suggested_quests = self.ai.suggest_quests(player_id, self.ai.player_data)
+            print("Suggested quests:")
+            for quest in suggested_quests:
+                print(f"- {quest}")
+        except Exception as e:
+            logger.error(f"Error suggesting quests: {e}")
+            print(f"Error: {e}")
 
     def do_generate_xp_table(self, arg):
         """Create and save the RuneScape XP table to a JSON file"""
