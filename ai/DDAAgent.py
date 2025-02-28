@@ -1,22 +1,12 @@
-import logging
-import requests
 import numpy as np
-import json
-import math
-import os
 from tensorflow import keras
 
 
 Model = keras.models.Model
 Sequential = keras.models.Sequential
-Input = keras.layers.Input
-Embedding = keras.layers.Embedding
-Flatten = keras.layers.Flatten
 Dense = keras.layers.Dense
-Concatenate = keras.layers.Concatenate
 Adam = keras.optimizers.Adam
-EarlyStopping = keras.callbacks.EarlyStopping
-ReduceLROnPlateau = keras.callbacks.ReduceLROnPlateau
+
 
 
 

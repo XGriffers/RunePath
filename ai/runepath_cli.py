@@ -1,10 +1,14 @@
 import cmd
 import logging
+import json
 from pathfinder import RunePathAI
 import numpy as np
 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
 
 class RunePathCLI(cmd.Cmd):
     intro = "Welcome to the RunePath AI CLI. Type 'help' for a list of commands."
@@ -14,6 +18,12 @@ class RunePathCLI(cmd.Cmd):
         super().__init__()
         self.ai = RunePathAI()
         self.current_player = None
+
+    def do_scrape_training_methods(self, arg):
+        """Scrape and save training methods from Wiki: scrape_training_methods"""
+        self.ai.scrape_and_save_training_methods()
+        print("Training methods scraped and saved to training_methods.json")
+
 
     def do_load_quests(self, arg):
         """Load quest data from RuneMetrics API: load_quests <username>"""
@@ -54,24 +64,25 @@ class RunePathCLI(cmd.Cmd):
         self.ai.update_membership(new_status)
         print(f"Membership status changed to: {'Member' if new_status else 'Free-to-play'}")
 
+    def do_pre_train_recommender(self, arg):
+        """Pre-train the recommender with Wiki data: pre_train_recommender <epochs> <batch_size>"""
+        args = arg.split()
+        epochs = int(args[0]) if len(args) > 0 else 100
+        batch_size = int(args[1]) if len(args) > 1 else 1024
+        self.ai.pre_train_recommender(epochs, batch_size)
+        print(f"Recommender pre-trained with {epochs} epochs and batch size {batch_size}")
+
     def do_train_recommender(self, arg):
         """Train the recommender system: train_recommender <epochs> <batch_size>"""
         if not self.current_player:
             print("Error: No player data loaded. Use 'load_player <username>' first.")
             return
-        
+    
         args = arg.split()
         epochs = int(args[0]) if len(args) > 0 else 100
         batch_size = int(args[1]) if len(args) > 1 else 1024
     
-        player_ids = np.random.randint(0, 1000, 10000)
-        quest_ids = np.random.randint(0, len(self.ai.quest_graph), 10000)
-        difficulties = np.random.randint(1, 10, 10000)
-        rewards = np.random.randint(100, 10000, 10000)
-        ratings = np.random.rand(10000)
-        combat_level = np.array([self.ai.player_data.get(self.current_player, {}).get("combat_level", 0)] * 10000)
-        
-        self.ai.train_recommender(player_ids, quest_ids, difficulties, rewards, ratings, epochs, batch_size)
+        self.ai.train_recommender(self.current_player, epochs, batch_size)
         print(f"Recommender system trained with {epochs} epochs and batch size {batch_size}")
 
     def do_suggest_quests(self, arg):
@@ -82,10 +93,10 @@ class RunePathCLI(cmd.Cmd):
         for quest in suggested_quests:
             print(f"- {quest}")
 
-    def do_create_xp_table(self, arg):
+    def do_generate_xp_table(self, arg):
         """Create and save the RuneScape XP table to a JSON file"""
         try:
-            self.ai.save_xp_table_to_json()
+            self.ai.generate_xp_table()
             print("XP table created and saved successfully.")
         except Exception as e:
             print(f"Error creating XP table: {str(e)}")
