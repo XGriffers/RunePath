@@ -22,6 +22,8 @@
 *.rar
 *.vscode
 */tf
+node_modules/
+*.bat
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
@@ -29,6 +31,7 @@ replay_pid*
 
 # Secret files
 application.properties
+.env
 
 # python specific
 __pycache__/
